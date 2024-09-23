@@ -1,0 +1,4 @@
+[deps]
+AnalyticalFilters = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+HiddenMarkovModels = "84ca31d5-effc-45e0-bfda-5a68cd981f47"
