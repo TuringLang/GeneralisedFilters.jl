@@ -17,4 +17,7 @@ include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
 
+# Utilities
+include("utilities/callbacks.jl")
+
 end

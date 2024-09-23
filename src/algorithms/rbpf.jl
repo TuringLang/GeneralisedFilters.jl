@@ -1,7 +1,6 @@
 import LinearAlgebra: I
 import Distributions: logpdf
 import LogExpFunctions: softmax, logsumexp
-import StatsBase: Weights
 
 export RBPF
 
@@ -72,13 +71,17 @@ function filter(
     algo::RBPF,
     observations::AbstractVector,
     extra0,
-    extras::AbstractVector,
+    extras::AbstractVector;
+    callback = nothing,
+    kwargs...
 )
     state = initialise(rng, model, algo, extra0)
     ll = 0.0
     for (i, obs) in enumerate(observations)
         state, step_ll = step(rng, model, algo, i, state, obs, extras[i])
         ll += step_ll
+
+        callback === nothing || callback(rng, model, algo, state, i; kwargs...)
     end
     return state, ll
 end
