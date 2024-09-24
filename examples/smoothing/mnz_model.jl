@@ -1,7 +1,5 @@
 using AnalyticalFilters, SSMProblems
-using Distributions, Random
-using LinearAlgebra, MatrixEquations, Polynomials
-using StatsFuns, StatsBase
+using LinearAlgebra, MatrixEquations
 
 ## MNZ MODEL ##################################################################
 
