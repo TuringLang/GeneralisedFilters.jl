@@ -16,6 +16,7 @@ include("models/hierarchical.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
+include("algorithms/rts_smoother.jl")
 
 # Utilities
 include("utilities/callbacks.jl")
