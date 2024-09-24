@@ -1,4 +1,5 @@
 import StatsBase: Weights
+using LinearAlgebra
 
 # RAO-BLACKWELLIZED PARTICLE CLOUD FUNCTIONS ##################################
 

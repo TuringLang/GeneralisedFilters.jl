@@ -186,7 +186,7 @@ extra0 = nothing
 extras = [nothing for _ in 1:length(observations)]
 
 rng = MersenneTwister(1234)
-rbpf = RBPF(KalmanFilter(), 256, 0.5)
+rbpf = RBPF(KalmanFilter(), 1024, 1.0)
 ucma_model = UC(MA([0.463]), 0.141^2, 0.224^2)
 
 # preallocate filtered statistics
@@ -239,7 +239,7 @@ extra0 = nothing
 extras = [nothing for _ in 1:length(observations)]
 
 rng = MersenneTwister(1234)
-rbpf = RBPF(KalmanFilter(), 256, 0.75)
+rbpf = RBPF(KalmanFilter(), 512, 1.0)
 
 @model function UCMA(data)
     # set the priors according to the paper
@@ -258,10 +258,12 @@ rbpf = RBPF(KalmanFilter(), 256, 0.75)
     Turing.@addlogprob! ll
 end
 
+kernel = RWMH(MvNormal(zeros(3), 0.005*I))
+
 chains = sample(
     rng,
     UCMA(observations),
-    MH(),
+    externalsampler(kernel),
     10_000
 )
 
@@ -271,10 +273,10 @@ histograms = begin
         # burn the first 1,000 draws
         CairoMakie.hist(
             fig[1, i],
-            chains[θ].data[:,1],
+            chains[θ].data[1_000:end,1],
             color = :gray,
             strokewidth = 1,
-            bins = 40,
+            bins = 20,
             normalization = :pdf,
             label = String(θ)
         )
