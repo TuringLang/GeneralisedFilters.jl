@@ -11,19 +11,17 @@ struct HHMWrapper{T<:AbstractHMM}
 end
 
 # NOTES:
-# - HHMs.jl does not split the the forward function intio initialise, predict, and update so
+# - HHMs.jl does not split the the forward function into initialise, predict, and update so
 #   the contents of these functions have had to be copied into new definitions
 # - HHMs.jl does not have a separate initialisation state so we do not include extra0 in the
-#   filtering signature (actually might not be true—need to check, see below)
+#   filtering signature
 
 function filter(model::HHMWrapper, filter::ForwardAlgorithm, obs::Vector, extras)
     # For this model, state corresponds to storage in HHMs.jl and stores the entire history
     # of states, updated in-place
     aug_extra = isnothing(extras[1]) ? (; T=length(obs)) : (; T=length(obs), extras[1]...)
     state, ll = initialise(model, filter, obs[1], aug_extra)
-    # HACK: stopping early to avoid off-by-one error—think HMMs.jl actually might have
-    # separate initialisation state
-    for i in 2:(length(obs) - 1)
+    for i in 2:length(obs)
         y = obs[i]
         state, step_ll = step(model, filter, i, state, y, extras[i])
         ll += step_ll
@@ -66,6 +64,7 @@ end
 ## Contents copied from HHMs.jl
 function step(model::HHMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
     hmm = model.hmm
+    t = t - 1  # HMMs.jl use a different indexing convention for filtering loop
 
     (; α, B, c) = storage
 
@@ -100,7 +99,7 @@ dists = [Normal(randn(), 1.0) for _ in 1:D]
 
 hmm = HMM(init, trans, dists)
 
-T = 3
+T = 10
 
 ys = rand(T)
 extras = [nothing for _ in 1:T]
