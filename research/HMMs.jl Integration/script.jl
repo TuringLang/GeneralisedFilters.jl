@@ -6,7 +6,7 @@ using LinearAlgebra
 import AnalyticalFilters: ForwardAlgorithm
 import HiddenMarkovModels: initialize_forward, obs_logdensities!
 
-struct HHMWrapper{T<:AbstractHMM}
+struct HMMWrapper{T<:AbstractHMM}
     hmm::T
 end
 
@@ -16,7 +16,7 @@ end
 # - HHMs.jl does not have a separate initialisation state so we do not include extra0 in the
 #   filtering signature
 
-function filter(model::HHMWrapper, filter::ForwardAlgorithm, obs::Vector, extras)
+function filter(model::HMMWrapper, filter::ForwardAlgorithm, obs::Vector, extras)
     # For this model, state corresponds to storage in HHMs.jl and stores the entire history
     # of states, updated in-place
     aug_extra = isnothing(extras[1]) ? (; T=length(obs)) : (; T=length(obs), extras[1]...)
@@ -30,7 +30,7 @@ function filter(model::HHMWrapper, filter::ForwardAlgorithm, obs::Vector, extras
 end
 
 ## Contents copied from HHMs.jl
-function initialise(model::HHMWrapper, ::ForwardAlgorithm, obs, extra)
+function initialise(model::HMMWrapper, ::ForwardAlgorithm, obs, extra)
     t1 = 1
     extra..., T = extra
     if length(extra) == 0
@@ -61,8 +61,27 @@ function initialise(model::HHMWrapper, ::ForwardAlgorithm, obs, extra)
     return storage, logL
 end
 
+function step(model::HMMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
+    state = predict(model, ForwardAlgorithm(), t, storage, obs, extra)
+    state, ll = update(model, ForwardAlgorithm(), t, state, obs, extra)
+    return state, ll
+end
+
 ## Contents copied from HHMs.jl
-function step(model::HHMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
+function predict(model::HMMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
+    hmm = model.hmm
+    t = t - 1  # HMMs.jl use a different indexing convention for filtering loop
+
+    (; α, B, c) = storage
+
+    trans = transition_matrix(hmm, extra)
+    αₜ, αₜ₊₁ = view(α, :, t), view(α, :, t + 1)
+    mul!(αₜ₊₁, transpose(trans), αₜ)
+    return storage
+end
+
+## Contents copied from HHMs.jl
+function update(model::HMMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
     hmm = model.hmm
     t = t - 1  # HMMs.jl use a different indexing convention for filtering loop
 
@@ -74,14 +93,12 @@ function step(model::HHMWrapper, ::ForwardAlgorithm, t, storage, obs, extra)
     logm = maximum(Bₜ₊₁)
     Bₜ₊₁ .= exp.(Bₜ₊₁ .- logm)
 
-    trans = transition_matrix(hmm, extra)
-    αₜ, αₜ₊₁ = view(α, :, t), view(α, :, t + 1)
-    mul!(αₜ₊₁, transpose(trans), αₜ)
+    αₜ₊₁ = view(α, :, t + 1)
     αₜ₊₁ .*= Bₜ₊₁
     c[t + 1] = inv(sum(αₜ₊₁))
     lmul!(c[t + 1], αₜ₊₁)
 
-    # Modified to return incrementing rather than updating
+    # Modified to return increment rather than updating
     logL = -log(c[t + 1]) + logm
 
     return storage, logL
@@ -104,4 +121,4 @@ T = 10
 ys = rand(T)
 extras = [nothing for _ in 1:T]
 
-state, ll = filter(HHMWrapper(hmm), ForwardAlgorithm(), ys, extras)
+state, ll = filter(HMMWrapper(hmm), ForwardAlgorithm(), ys, extras)
