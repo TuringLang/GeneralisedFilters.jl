@@ -60,6 +60,47 @@ using TestItemRunner
     @test only(states).Σ ≈ Σ_X1
 end
 
+@testitem "Square root Kalman filter test" begin
+    using AnalyticalFilters
+    using LinearAlgebra
+    using PDMats
+    using StableRNGs
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, 2)
+    Σ0 = rand(rng, 2, 2)
+    Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+    Σ0 = PDMat(Σ0)
+    A = rand(rng, 2, 2)
+    b = zeros(2)
+    Q = rand(rng, 2, 2)
+    Q = Q * Q'  # make Q positive definite
+    Q = PDMat(Q)
+    H = rand(rng, 2, 2)
+    c = zeros(2)
+    R = rand(rng, 2, 2)
+    R = R * R'  # make R positive definite
+    R = PDMat(R)
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+
+    T = 5
+    observations = [rand(rng, 2) for _ in 1:T]
+    extras = [nothing for _ in 1:T]
+
+    kf = KalmanFilter()
+    kf_states, kf_ll = AnalyticalFilters.filter(model, kf, observations, nothing, extras)
+
+    srkf = SRKF()
+    srkf_states, srkf_ll = AnalyticalFilters.filter(
+        model, srkf, observations, nothing, extras
+    )
+
+    @test last(kf_states).μ ≈ last(srkf_states).μ
+    @test last(kf_states).Σ ≈ last(srkf_states).Σ.L * last(srkf_states).Σ.L'
+    @test kf_ll ≈ srkf_ll
+end
+
 @testitem "Forward algorithm test" begin
     using AnalyticFilters
     using Distributions

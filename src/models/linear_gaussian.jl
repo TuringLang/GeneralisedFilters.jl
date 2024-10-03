@@ -36,7 +36,7 @@ function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra
 end
 
 const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
-    D,O
+    T,D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
 # TODO: this is hacky and should ideally be removed
@@ -73,12 +73,14 @@ end
 #### HOMOGENEOUS LINEAR GAUSSIAN MODEL ####
 ###########################################
 
-struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamics{T}
-    μ0::Vector{T}
-    Σ0::Matrix{T}
-    A::Matrix{T}
-    b::Vector{T}
-    Q::Matrix{T}
+struct HomogeneousLinearGaussianLatentDynamics{
+    T,V<:AbstractVector{T},M_ge<:AbstractMatrix{T},M_cov<:AbstractMatrix{T}
+} <: LinearGaussianLatentDynamics{T}
+    μ0::V
+    Σ0::M_cov
+    A::M_ge
+    b::V
+    Q::M_cov
 end
 calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.μ0
 calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.Σ0
@@ -86,10 +88,12 @@ calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.A
 calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.b
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.Q
 
-struct HomogeneousLinearGaussianObservationProcess{T} <: LinearGaussianObservationProcess{T}
-    H::Matrix{T}
-    c::Vector{T}
-    R::Matrix{T}
+struct HomogeneousLinearGaussianObservationProcess{
+    T,V<:AbstractVector{T},M_ge<:AbstractMatrix{T},M_cov<:AbstractMatrix{T}
+} <: LinearGaussianObservationProcess{T}
+    H::M_ge
+    c::V
+    R::M_cov
 end
 calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra) = obs.H
 calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra) = obs.c
