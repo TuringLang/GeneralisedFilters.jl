@@ -5,6 +5,7 @@ using TestItemRunner
 
 @testitem "Kalman filter test" begin
     using AnalyticalFilters
+    using Distributions
     using LinearAlgebra
     using StableRNGs
 
@@ -27,7 +28,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticalFilters.filter(model, kf, observations, nothing, [nothing])
+    states, ll = AnalyticalFilters.filter(model, kf, observations, nothing, [nothing])
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -55,13 +56,18 @@ using TestItemRunner
     μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
     Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-    # TODO: test log-likelihood using marginalisation formula
     @test only(states).μ ≈ μ_X1
     @test only(states).Σ ≈ Σ_X1
+
+    # Exact marginal distribution to test log-likelihood
+    μ_Y1 = μ_Z[I_y]
+    Σ_Y1 = Σ_Z[I_y, I_y]
+    true_ll = logpdf(MvNormal(μ_Y1, Σ_Y1), y)
+    @test ll ≈ true_ll
 end
 
 @testitem "Forward algorithm test" begin
-    using AnalyticFilters
+    using AnalyticalFilters
     using Distributions
     using StableRNGs
     using SSMProblems
@@ -90,7 +96,7 @@ end
 
     observations = [rand(rng)]
 
-    states, ll = AnalyticFilters.filter(
+    states, ll = AnalyticalFilters.filter(
         model, ForwardAlgorithm(), observations, nothing, [nothing]
     )
 
@@ -202,6 +208,7 @@ end
 
     println("ESS: ", 1 / sum(weights .^ 2))
     println("Weighted mean:", sum(xs .* weights))
+    println("Vanilla mean:", sum(xs) / N_particles)
     println("Kalman filter mean:", kf_states[T].μ[1:2])
 
     # Resample outer states
@@ -223,4 +230,141 @@ end
     # )
 
     # @test pvalue(test) > 0.05
+end
+
+@testitem "GPU Kalman-RBPF test" begin
+    using AnalyticalFilters
+    using Distributions
+    using HypothesisTests
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using StableRNGs
+    using StatsBase
+
+    using CUDA
+    using NNlib
+
+    D_outer = 2
+    D_inner = 3
+    D_obs = 2
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    function AnalyticalFilters.batch_calc_μ0s(dyn::InnerDynamics{T}, extra, N) where {T}
+        μ0s = CuArray{Float32}(undef, length(dyn.μ0), N)
+        return μ0s[:, :] .= cu(dyn.μ0)
+    end
+    function AnalyticalFilters.batch_calc_Σ0s(
+        dyn::InnerDynamics{T}, extra, N::Integer
+    ) where {T}
+        Σ0s = CuArray{Float32}(undef, size(dyn.Σ0)..., N)
+        return Σ0s[:, :, :] .= cu(dyn.Σ0)
+    end
+    function AnalyticalFilters.batch_calc_As(
+        dyn::InnerDynamics, ::Integer, extra, N::Integer
+    )
+        As = CuArray{Float32}(undef, size(dyn.A)..., N)
+        As[:, :, :] .= cu(dyn.A)
+        return As
+    end
+    function AnalyticalFilters.batch_calc_bs(
+        dyn::InnerDynamics, ::Integer, extra, N::Integer
+    )
+        Cs = CuArray{Float32}(undef, size(dyn.C)..., N)
+        Cs[:, :, :] .= cu(dyn.C)
+        return NNlib.batched_vec(Cs, extra.prev_outer) .+ cu(dyn.b)
+    end
+    function AnalyticalFilters.batch_calc_Qs(
+        dyn::InnerDynamics, ::Integer, extra, N::Integer
+    )
+        Q = CuArray{Float32}(undef, size(dyn.Q)..., N)
+        return Q[:, :, :] .= cu(dyn.Q)
+    end
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
+    ]
+    A = [
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer) / 10.0, rand(rng, D_inner, D_inner) / 10.0]
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
+    ]
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 1000
+    T = 10
+
+    observations = [rand(rng, D_obs) for _ in 1:T]
+    extra0 = nothing
+    extras = [nothing for _ in 1:T]
+
+    # Kalman filtering
+
+    full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    kf_states, kf_ll = AnalyticalFilters.filter(
+        full_model, KalmanFilter(), observations, extra0, extras
+    )
+
+    # Rao-Blackwellised particle filtering
+
+    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
+    )
+    inner_dyn = InnerDynamics(
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
+    )
+    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles, 0.8)
+    (xs, zs, log_ws), ll = AnalyticalFilters.filter(
+        hier_model, rbpf, observations, extra0, extras
+    )
+
+    weights = softmax(log_ws)
+    reshaped_weights = reshape(weights, (1, length(weights)))
+
+    println("Weighted mean: ", sum(xs[1:D_outer, :] .* reshaped_weights; dims=2))
+    println("Kalman filter mean:", kf_states[T].μ[1:D_outer])
+
+    println("Weighted mean: ", sum(zs.μs .* reshaped_weights; dims=2))
+    println("Kalman filter mean:", kf_states[T].μ[(D_outer + 1):end])
+
+    println("Kalman log-likelihood: ", kf_ll)
+    println("RBPF log-likelihood: ", ll)
 end

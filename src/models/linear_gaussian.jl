@@ -5,6 +5,7 @@ export create_homogeneous_linear_gaussian_model
 
 import SSMProblems: distribution
 import Distributions: MvNormal
+import LinearAlgebra: cholesky
 
 abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vector{T}} end
 
@@ -36,7 +37,7 @@ function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra
 end
 
 const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
-    D,O
+    T,D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
 # TODO: this is hacky and should ideally be removed
@@ -100,4 +101,90 @@ function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
         HomogeneousLinearGaussianLatentDynamics(μ0, Σ0, A, b, Q),
         HomogeneousLinearGaussianObservationProcess(H, c, R),
     )
+end
+
+#######################
+#### BATCH METHODS ####
+#######################
+
+function batch_calc_μ0s end
+function batch_calc_Σ0s end
+function batch_calc_As end
+function batch_calc_bs end
+function batch_calc_Qs end
+function batch_calc_Hs end
+function batch_calc_cs end
+function batch_calc_Rs end
+
+# TODO: can we remove batch size argument?
+function batch_calc_initial(dyn::LinearGaussianLatentDynamics, extra, N::Integer)
+    return batch_calc_μ0s(dyn, extra, N), batch_calc_Σ0s(dyn, extra, N)
+end
+
+function batch_calc_params(
+    dyn::LinearGaussianLatentDynamics, step::Integer, extra, N::Integer
+)
+    return (
+        batch_calc_As(dyn, step, extra, N),
+        batch_calc_bs(dyn, step, extra, N),
+        batch_calc_Qs(dyn, step, extra, N),
+    )
+end
+
+function batch_calc_params(
+    obs::LinearGaussianObservationProcess, step::Integer, extra, N::Integer
+)
+    return (
+        batch_calc_Hs(obs, step, extra, N),
+        batch_calc_cs(obs, step, extra, N),
+        batch_calc_Rs(obs, step, extra, N),
+    )
+end
+
+function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, extra, N::Integer)
+    μ0, Σ0 = AnalyticalFilters.calc_initial(dyn, extra)
+    D = length(μ0)
+    L = cholesky(Σ0).L
+    # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
+    Ls = CuArray{Float32}(undef, size(Σ0)..., N)
+    Ls[:, :, :] .= cu(Σ0)
+    return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(D, N))
+end
+
+function batch_simulate(
+    dyn::AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics,
+    step::Integer,
+    prev_state,
+    extra,
+    N::Integer,
+)
+    A, b, Q = AnalyticalFilters.calc_params(dyn, step, extra)
+    D = length(b)
+    L = cholesky(Q).L
+    Ls = CuArray{Float32}(undef, size(Q)..., N)
+    Ls[:, :, :] .= cu(Q)
+    As = CuArray{Float32}(undef, size(A)..., N)
+    As[:, :, :] .= cu(A)
+    return (NNlib.batched_vec(As, prev_state) .+ cu(b)) +
+           NNlib.batched_vec(Ls, CUDA.randn(D, N))
+end
+
+function batch_calc_Hs(
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+)
+    H = CuArray{Float32}(undef, size(obs.H)..., N)
+    return H[:, :, :] .= cu(obs.H)
+end
+function batch_calc_cs(
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+)
+    c = CuArray{Float32}(undef, size(obs.c)..., N)
+    return c[:, :] .= cu(obs.c)
+end
+
+function batch_calc_Rs(
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+)
+    R = CuArray{Float32}(undef, size(obs.R)..., N)
+    return R[:, :, :] .= cu(obs.R)
 end
