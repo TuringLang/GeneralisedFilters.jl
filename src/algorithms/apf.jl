@@ -50,9 +50,13 @@ function predict(
     # Compute auxilary weights
     # POC: use the simplest approximation to the predictive likelihood
     # Ideally should be something like update_weights!(filter, ...)
-    auxiliary_weights = map(
+    predicted = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.filtered.particles,
+    )
+    auxiliary_weights = map(
+        x -> SSMProblems.logdensity(model.obs, step - 1, x, observation; kwargs...),
+        predicted,
     )
     state.filtered.log_weights .+= auxiliary_weights
     filter.aux = auxiliary_weights
