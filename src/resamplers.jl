@@ -6,8 +6,11 @@ export Multinomial, Systematic, Metropolis, Rejection
 abstract type AbstractResampler end
 
 function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}, filter::U
-) where {PT,WT,U<:AbstractFilter}
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::ParticleState{PT,WT},
+    filter::AbstractFilter,
+) where {PT,WT}
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
