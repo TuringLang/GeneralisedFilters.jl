@@ -65,13 +65,11 @@ Base.keys(state::ParticleState) = LinearIndices(state.particles)
 Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particles[i]
 # Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
-function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
-    fill!(state.log_weights, -log(WT(length(state.particles))))
-    return state.log_weights
-end
-
 function update_ref!(
-    pc::ParticleContainer{T}, ref_state::Union{Nothing,AbstractVector{T}}, step::Integer=0
+    pc::ParticleContainer{T},
+    ref_state::Union{Nothing,AbstractVector{T}},
+    ::AbstractFilter,
+    step::Integer=0,
 ) where {T}
     # this comes from Nicolas Chopin's package particles
     if !isnothing(ref_state)
@@ -80,10 +78,6 @@ function update_ref!(
         pc.ancestors[1] = 1
     end
     return pc
-end
-
-function logmarginal(states::ParticleContainer)
-    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
 
 ## SPARSE PARTICLE STORAGE #################################################################
