@@ -1,13 +1,13 @@
 export AuxiliaryParticleFilter, APF
 
-struct AuxiliaryParticleFilter{RS<:AbstractConditionalResampler} <: AbstractFilter
+mutable struct AuxiliaryParticleFilter{RS<:AbstractConditionalResampler} <: AbstractFilter
     N::Integer
     resampler::RS
     aux::Vector # Auxiliary weights
 end
 
 function AuxiliaryParticleFilter(
-    N::Integer, threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
     return AuxiliaryParticleFilter(N, conditional_resampler, zeros(N))
@@ -25,7 +25,7 @@ function initialise(
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
     initial_weights = fill(-log(T(filter.N)), filter.N)
 
-    return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
+    return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state, filter)
 end
 
 function update_weights!(
@@ -57,16 +57,16 @@ function predict(
     auxiliary_weights = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...), predicted
     )
-    state.filtered.log_weights .+= auxiliary_weights
+    states.filtered.log_weights .+= auxiliary_weights
     filter.aux = auxiliary_weights
 
-    states.proposed = resample(rng, filter.resampler, states.filtered, filter)
+    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered, filter)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.proposed.particles,
     )
 
-    return update_ref!(states, ref_state, step)
+    return update_ref!(states, ref_state, filter, step)
 end
 
 function update(
