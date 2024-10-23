@@ -7,7 +7,7 @@ mutable struct AuxiliaryParticleFilter{RS<:AbstractConditionalResampler} <: Abst
 end
 
 function AuxiliaryParticleFilter(
-    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+    N::Integer; threshold::Real=0., resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
     return AuxiliaryParticleFilter(N, conditional_resampler, zeros(N))
