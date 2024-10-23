@@ -51,12 +51,11 @@ function predict(
     # POC: use the simplest approximation to the predictive likelihood
     # Ideally should be something like update_weights!(filter, ...)
     predicted = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
+        x -> mean(SSMProblems.distribution(model.dyn, step, x; kwargs...)),
         states.filtered.particles,
     )
     auxiliary_weights = map(
-        x -> SSMProblems.logdensity(model.obs, step - 1, x, observation; kwargs...),
-        predicted,
+        x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...), predicted
     )
     state.filtered.log_weights .+= auxiliary_weights
     filter.aux = auxiliary_weights
@@ -80,7 +79,7 @@ function update(
 ) where {T}
     @debug "step $step"
     log_increments = map(
-        x -> SSMProblems.logdensity(model.obs, step - 1, x, observation; kwargs...),
+        x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
         collect(states.proposed.particles),
     )
 

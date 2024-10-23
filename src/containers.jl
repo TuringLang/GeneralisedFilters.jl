@@ -134,7 +134,7 @@ function prune!(tree::ParticleTree, offspring::Vector{Int64})
 end
 
 function insert!(
-    tree::ParticleTree{T}, states::Vector{T}, ancestors::AbstractVector{Int64}
+    tree::ParticleTree{T}, states::Vector{T}, ancestors::AbstractVector{<:Integer}
 ) where {T}
     # parents of new generation
     parents = getindex(tree.leaves, ancestors)
@@ -167,7 +167,7 @@ function expand!(tree::ParticleTree)
     return tree
 end
 
-function get_offspring(a::AbstractVector{Int64})
+function get_offspring(a::AbstractVector{<:Integer})
     offspring = zero(a)
     for i in a
         offspring[i] += 1
