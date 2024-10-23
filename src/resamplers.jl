@@ -14,11 +14,12 @@ function resample(
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    state = ParticleState(
+    new_state = ParticleState(
         states.particles[idxs],
         fill(-log(WT(length(states))), length(states)), # Do we need to init weights before reset ?
     )
-    return reset_weights!(state, idxs, filter)
+    reset_weights!(new_state, idxs, filter)
+    return new_state, idxs
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################

@@ -42,7 +42,7 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
+    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered, algo)
 
     for i in 1:(algo.N)
         prev_x = states.proposed.particles[i].x
