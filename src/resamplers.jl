@@ -6,15 +6,19 @@ export Multinomial, Systematic, Metropolis, Rejection
 abstract type AbstractResampler end
 
 function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::ParticleState{PT,WT},
+    filter::AbstractFilter,
 ) where {PT,WT}
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
     new_state = ParticleState(
-        states.particles[idxs], fill(-log(WT(length(states))), length(states))
+        states.particles[idxs],
+        fill(-log(WT(length(states))), length(states)), # Do we need to init weights before reset ?
     )
-
+    reset_weights!(new_state, idxs, filter)
     return new_state, idxs
 end
 
@@ -31,7 +35,10 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{T,WT}
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state::ParticleState{T,WT},
+    filter::AbstractFilter,
 ) where {T,WT<:Real}
     n = length(state)
     weights = StatsBase.weights(state)
@@ -39,7 +46,7 @@ function resample(
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+        return resample(rng, cond_resampler.resampler, state, filter)
     else
         return state, collect(1:n)
     end

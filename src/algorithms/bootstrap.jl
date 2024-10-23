@@ -3,13 +3,13 @@ export BootstrapFilter, BF
 struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
     N::Integer
     resampler::RS
+end
 
-    function BootstrapFilter(
-        N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
-    )
-        conditional_resampler = ESSResampler(threshold, resampler)
-        return new{typeof(conditional_resampler)}(N, conditional_resampler)
-    end
+function BootstrapFilter(
+    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+)
+    conditional_resampler = ESSResampler(threshold, resampler)
+    return BootstrapFilter(N, conditional_resampler)
 end
 
 """Shorthand for `BootstrapFilter`"""
@@ -25,7 +25,9 @@ function initialise(
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
     initial_weights = fill(-log(T(filter.N)), filter.N)
 
-    return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
+    return update_ref!(
+        ParticleContainer(initial_states, initial_weights), ref_state, filter
+    )
 end
 
 function predict(
@@ -37,13 +39,13 @@ function predict(
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
-    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
+    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered, filter)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.proposed.particles,
     )
 
-    return update_ref!(states, ref_state, step)
+    return update_ref!(states, ref_state, filter, step)
 end
 
 function update(
@@ -63,4 +65,15 @@ function update(
     states.filtered.particles = states.proposed.particles
 
     return (states, logsumexp(log_increments) - log(T(filter.N)))
+end
+
+function reset_weights!(
+    state::ParticleState{T,WT}, idxs, filter::BootstrapFilter
+) where {T,WT<:Real}
+    fill!(state.log_weights, -log(WT(length(state.particles))))
+    return state
+end
+
+function logmarginal(states::ParticleContainer, ::BootstrapFilter)
+    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
