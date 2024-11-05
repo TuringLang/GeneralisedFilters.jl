@@ -72,7 +72,7 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
+    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered, algo)
 
     states.proposed.particles = map(
         x -> marginal_predict(rng, model, algo, t, x; kwargs...),
@@ -108,7 +108,7 @@ function update(
 
     states.filtered.log_weights = states.proposed.log_weights + log_increments
 
-    return states, logmarginal(states)
+    return states, logmarginal(states, algo)
 end
 
 #################################

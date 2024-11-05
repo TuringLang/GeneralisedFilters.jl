@@ -13,6 +13,8 @@ using NNlib
 
 abstract type AbstractFilter <: AbstractSampler end
 
+abstract type AbstractParticleFilter{N} <: AbstractFilter end
+
 """
     predict([rng,] model, alg, iter, state; kwargs...)
 
@@ -40,6 +42,22 @@ function initialise end
 Perform a combined predict and update call on a single iteration of the filter.
 """
 function step end
+
+"""
+    reset_weights!(log_weights, filter)
+
+Reset container log-weights after a resampling step
+"""
+function reset_weights! end
+
+"""
+    update_weights!
+"""
+function update_weights! end
+
+function log_marginal end
+
+function update_ref! end
 
 function initialise(model, alg; kwargs...)
     return initialise(default_rng(), model, alg; kwargs...)
@@ -106,6 +124,7 @@ include("models/hierarchical.jl")
 
 # Filtering/smoothing algorithms
 include("algorithms/bootstrap.jl")
+include("algorithms/apf.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")

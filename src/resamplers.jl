@@ -8,13 +8,15 @@ export Multinomial, Systematic, Stratified, Metropolis, Rejection
 abstract type AbstractResampler end
 
 function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::ParticleState{PT,WT},
+    filter::AbstractFilter;
+    weights::AbstractVector{WT}=StatsBase.weights(states)
 ) where {PT,WT}
-    weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
-
-    new_state = ParticleState(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
-
+    new_state = ParticleState(deepcopy(states.particles[idxs]), zeros(WT, length(states))) 
+    reset_weights!(new_state, idxs, filter)
     return new_state, idxs
 end
 
@@ -23,8 +25,9 @@ function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
     states::RaoBlackwellisedParticleState{T,M,ZT},
+    ::AbstractFilter;
+    weights=StatsBase.weights(states)
 ) where {T,M,ZT}
-    weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
     new_state = RaoBlackwellisedParticleState(
@@ -49,7 +52,7 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{PT,WT}
+    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{PT,WT}, filter::AbstractFilter
 ) where {PT,WT}
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
@@ -58,7 +61,7 @@ function resample(
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+        return resample(rng, cond_resampler.resampler, state, filter; weights=weights)
     else
         return deepcopy(state), collect(1:n)
     end

@@ -110,7 +110,9 @@ end
     _, _, data = sample(rng, model, 20)
 
     bf = BF(2^12; threshold=0.8)
+    apf = APF(2^10, threshold=1.)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    _, llapf= GeneralisedFilters.filter(rng, model, apf, data)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
     xs = bf_state.filtered.particles
@@ -121,6 +123,7 @@ end
 
     # since this is log valued, we can up the tolerance
     @test llkf ≈ llbf atol = 0.1
+    @test llkf ≈ llapf atol = 2
 end
 
 @testitem "Forward algorithm test" begin
