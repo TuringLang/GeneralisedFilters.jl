@@ -109,9 +109,9 @@ end
     _, _, data = sample(rng, model, 20)
 
     bf = BF(2^12; threshold=0.8)
-    apf = APF(2^10, threshold=1.)
+    apf = APF(2^10; threshold=1.0)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
-    _, llapf= GeneralisedFilters.filter(rng, model, apf, data)
+    _, llapf = GeneralisedFilters.filter(rng, model, apf, data)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
     xs = bf_state.filtered.particles
@@ -123,6 +123,137 @@ end
     # since this is log valued, we can up the tolerance
     @test llkf ≈ llbf atol = 0.1
     @test llkf ≈ llapf atol = 2
+end
+
+@testitem "APF filter test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using Random: randexp
+
+    T = Float32
+    rng = StableRNG(1234)
+    σx², σy² = randexp(rng, T, 2)
+
+    # initial state distribution
+    μ0 = zeros(T, 2)
+    Σ0 = PDMat(T[1 0; 0 1])
+
+    # state transition equation
+    A = T[1 1; 0 1]
+    b = T[0; 0]
+    Q = PDiagMat([σx²; 0])
+
+    # observation equation
+    H = T[1 0]
+    c = T[0;]
+    R = [σy²;;]
+
+    # when working with PDMats, the Kalman filter doesn't play nicely without this
+    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
+        return PDMat(Symmetric(mat))
+    end
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    _, _, data = sample(rng, model, 20)
+
+    bf = APF(2^10; threshold=0.8)
+    _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+
+    # since this is log valued, we can up the tolerance
+    @test llkf ≈ llbf atol = 2
+end
+
+@testitem "Guided particle filter test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using Random: randexp
+    using Distributions
+
+    # this is a pseudo optimal proposal kernel for linear Gaussian models
+    struct LinearGaussianProposal{T<:Real} <: GeneralisedFilters.AbstractProposal
+        φ::Vector{T}
+    end
+
+    # a lot of computations done at each step
+    function SSMProblems.distribution(
+        model::AbstractStateSpaceModel,
+        kernel::LinearGaussianProposal,
+        step::Integer,
+        state,
+        observation;
+        kwargs...,
+    )
+        # get model dimensions
+        dx = length(state)
+        dy = length(observation)
+
+        # see (Corenflos et al, 2021) for details
+        A = GeneralisedFilters.calc_A(model.dyn, step; kwargs...)
+        Γ = diagm(dx, dy, kernel.φ[(dx + 1):end])
+        Σ = PDiagMat(φ[1:dx])
+
+        return MvNormal(inv(Σ) * A * state + inv(Σ) * Γ * observation, Σ)
+    end
+
+    T = Float32
+    rng = StableRNG(1234)
+    σx², σy² = randexp(rng, T, 2)
+
+    # initial state distribution
+    μ0 = zeros(T, 1)
+    Σ0 = PDiagMat(T[1;])
+
+    # state transition equation
+    A = T[0.9;;]
+    b = T[0;]
+    Q = PDiagMat([σx²;])
+
+    # observation equation
+    H = T[1;;]
+    c = T[0;]
+    R = PDiagMat([σy²;])
+
+    # proposal kernel (kind of optimal...)
+    φ = ones(T, 2)
+    proposal = LinearGaussianProposal(φ)
+
+    # when working with PDMats, the Kalman filter doesn't play nicely without this
+    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
+        return PDMat(Symmetric(mat))
+    end
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    _, _, data = sample(rng, model, 20)
+
+    # bootstrap filter
+    bf = BF(2^12; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    bf_xs = bf_state.filtered.particles
+    bf_ws = softmax(bf_state.filtered.log_weights)
+
+    # guided particle filter
+    pf = GPF(2^12, proposal; threshold=0.8)
+    pf_state, llpf = GeneralisedFilters.filter(rng, model, pf, data)
+    pf_xs = pf_state.filtered.particles
+    pf_ws = softmax(pf_state.filtered.log_weights)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+
+    # Compare filtered states
+    @test first(kf_state.μ) ≈ sum(first.(bf_xs) .* bf_ws) rtol = 1e-2
+    @test first(kf_state.μ) ≈ sum(first.(pf_xs) .* pf_ws) rtol = 1e-2
+
+    # since this is log valued, we can up the tolerance
+    @test llkf ≈ llbf atol = 0.1
+    @test llkf ≈ llpf atol = 2
 end
 
 @testitem "Forward algorithm test" begin

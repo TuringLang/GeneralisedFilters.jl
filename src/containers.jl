@@ -276,7 +276,7 @@ end
 function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
     if step == 1
         # this may be incorrect, but it is functional
-        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
+        @inbounds c.tree.states[keys(states.filtered)] = deepcopy(states.filtered.particles)
     end
     # TODO: when using non-stack version, may be more efficient to wait until storage full
     # to prune
@@ -304,7 +304,7 @@ end
 function (c::ResamplerCallback)(model, filter, step, states, data; kwargs...)
     if step != 1
         prune!(c.tree, get_offspring(states.ancestors))
-        insert!(c.tree, collect(1:(filter.N)), states.ancestors)
+        insert!(c.tree, collect(keys(states.filtered)), states.ancestors)
     end
     return nothing
 end

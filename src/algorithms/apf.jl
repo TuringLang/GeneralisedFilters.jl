@@ -6,7 +6,7 @@ mutable struct AuxiliaryParticleFilter{N,RS<:AbstractConditionalResampler} <: Ab
 end
 
 function AuxiliaryParticleFilter(
-    N::Integer; threshold::Real=0., resampler::AbstractResampler=Systematic()
+    N::Integer; threshold::Real=0.0, resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
     return AuxiliaryParticleFilter{N,typeof(conditional_resampler)}(conditional_resampler, zeros(N))
@@ -24,7 +24,9 @@ function initialise(
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:N)
     initial_weights = zeros(T, N)
 
-    return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state, filter)
+    return update_ref!(
+        ParticleContainer(initial_states, initial_weights), ref_state, filter
+    )
 end
 
 function update_weights!(
@@ -59,7 +61,9 @@ function predict(
     states.filtered.log_weights .+= auxiliary_weights
     filter.aux = auxiliary_weights
 
-    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered, filter)
+    states.proposed, states.ancestors = resample(
+        rng, filter.resampler, states.filtered, filter
+    )
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.proposed.particles,
@@ -70,12 +74,12 @@ end
 
 function update(
     model::StateSpaceModel{T},
-    filter::AuxiliaryParticleFilter,
+    filter::AuxiliaryParticleFilter{N},
     step::Integer,
     states::ParticleContainer,
     observation;
     kwargs...,
-) where {T}
+) where {T,N}
     @debug "step $step"
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),

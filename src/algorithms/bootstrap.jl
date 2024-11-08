@@ -1,5 +1,7 @@
 export BootstrapFilter, BF
 
+abstract type AbstractParticleFilter{N} <: AbstractFilter end
+
 struct BootstrapFilter{N,RS<:AbstractResampler} <: AbstractParticleFilter{N}
     resampler::RS
 end
@@ -8,7 +10,7 @@ function BootstrapFilter(
     N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
-    return BootstrapFilter{N, typeof(conditional_resampler)}(conditional_resampler)
+    return BootstrapFilter{N,typeof(conditional_resampler)}(conditional_resampler)
 end
 
 """Shorthand for `BootstrapFilter`"""
@@ -38,7 +40,9 @@ function predict(
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
-    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered, filter)
+    states.proposed, states.ancestors = resample(
+        rng, filter.resampler, states.filtered, filter
+    )
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         collect(states.proposed),
@@ -49,12 +53,12 @@ end
 
 function update(
     model::StateSpaceModel{T},
-    filter::BootstrapFilter,
+    filter::BootstrapFilter{N},
     step::Integer,
     states::ParticleContainer,
     observation;
     kwargs...,
-) where {T}
+) where {T,N}
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
         collect(states.proposed),
@@ -67,9 +71,9 @@ function update(
 end
 
 function reset_weights!(
-    state::ParticleState{T,WT}, idxs, filter::BootstrapFilter
+    state::ParticleState{T,WT}, idxs, ::BootstrapFilter
 ) where {T,WT<:Real}
-    fill!(state.log_weights, -log(WT(length(state.particles))))
+    fill!(state.log_weights, zero(WT))
     return state
 end
 
