@@ -1,7 +1,7 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 
-export KalmanFilter, KF
+export KalmanFilter, KF, KalmanSmoother, KS
 
 struct KalmanFilter <: AbstractFilter end
 
@@ -19,24 +19,23 @@ function predict(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::Gaussian;
+    filtered::Gaussian;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states)
+    μ, Σ = GaussianDistributions.pair(filtered)
     A, b, Q = calc_params(model.dyn, step; kwargs...)
-    states = Gaussian(A * μ + b, A * Σ * A' + Q)
-    return states
+    return Gaussian(A * μ + b, A * Σ * A' + Q)
 end
 
 function update(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::Gaussian,
+    proposed::Gaussian,
     obs::AbstractVector;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states)
+    μ, Σ = GaussianDistributions.pair(proposed)
     H, c, R = calc_params(model.obs, step; kwargs...)
 
     # Update state
@@ -45,14 +44,15 @@ function update(
     S = H * Σ * H' + R
     K = Σ * H' / S
 
-    states = Gaussian(μ + K * y, Σ - K * H * Σ)
-
-    # Compute log-likelihood
     # HACK: force the covariance to be positive definite
     S = (S + S') / 2
+
+    filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
+
+    # Compute log-likelihood
     ll = logpdf(MvNormal(m, S), obs)
 
-    return states, ll
+    return filtered, ll
 end
 
 struct BatchKalmanFilter <: AbstractFilter
@@ -164,12 +164,94 @@ function update(
 
     inv_term = NNlib.batched_vec(S_inv, y .- m)
     log_likes =
-        -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
+        -T(0.5) * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
     D = size(y, 1)
-    log_likes = log_likes .- 0.5f0 * log_dets .- D / 2 * log(T(2π))
+    log_likes = log_likes .- T(0.5) * (log_dets .+ D * log(T(2π)))
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
     log_likes[isnan.(log_likes)] .= -Inf
 
     return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
+end
+
+## KALMAN SMOOTHER #########################################################################
+
+struct KalmanSmoother <: AbstractSmoother end
+
+const KS = KalmanSmoother()
+
+struct StateCallback{T}
+    proposed_states::Vector{Gaussian{Vector{T},Matrix{T}}}
+    filtered_states::Vector{Gaussian{Vector{T},Matrix{T}}}
+end
+function StateCallback(N::Integer, T::Type)
+    return StateCallback{T}(
+        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
+        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
+    )
+end
+
+function (callback::StateCallback)(
+    model::LinearGaussianStateSpaceModel, algo::KalmanFilter, states, obs; kwargs...
+)
+    return nothing
+end
+
+function (callback::StateCallback)(
+    model::LinearGaussianStateSpaceModel,
+    algo::KalmanFilter,
+    iter::Integer,
+    states,
+    obs;
+    kwargs...,
+)
+    callback.proposed_states[iter] = states.proposed
+    callback.filtered_states[iter] = states.filtered
+    return nothing
+end
+
+function smooth(
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel{T},
+    alg::KalmanSmoother,
+    observations::AbstractVector;
+    t_smooth=1,
+    callback=nothing,
+    kwargs...,
+) where {T}
+    cache = StateCallback(length(observations), T)
+
+    filtered, ll = filter(
+        rng, model, KalmanFilter(), observations; callback=cache, kwargs...
+    )
+
+    back_state = filtered
+    for t in (length(observations) - 1):-1:t_smooth
+        back_state = backward(
+            rng, model, alg, t, back_state, observations[t]; states_cache=cache, kwargs...
+        )
+    end
+
+    return back_state, ll
+end
+
+function backward(
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel{T},
+    alg::KalmanSmoother,
+    iter::Integer,
+    back_state,
+    obs;
+    states_cache,
+    kwargs...,
+) where {T}
+    μ, Σ = GaussianDistributions.pair(back_state)
+    μ_pred, Σ_pred = GaussianDistributions.pair(states_cache.proposed_states[iter + 1])
+    μ_filt, Σ_filt = GaussianDistributions.pair(states_cache.filtered_states[iter])
+
+    G = Σ_filt * model.dyn.A' * inv(Σ_pred)
+    μ = μ_filt .+ G * (μ .- μ_pred)
+    Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+
+    return Gaussian(μ, Σ)
 end

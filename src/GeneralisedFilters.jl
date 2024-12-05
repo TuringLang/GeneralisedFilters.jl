@@ -4,6 +4,7 @@ using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng, rand
 using GaussianDistributions: pairs, Gaussian
+using OffsetArrays
 using SSMProblems
 using StatsBase
 
@@ -11,21 +12,21 @@ using StatsBase
 using CUDA
 using NNlib
 
+## FILTERING BASE ##########################################################################
+
 abstract type AbstractFilter <: AbstractSampler end
 
 """
-    predict([rng,] model, alg, iter, state; kwargs...)
+    instantiate(model, alg, initial; kwargs...)
 
-Propagate the filtered states forward in time.
+Create an intermediate storage object to store the proposed/filtered states at each step.
 """
-function predict end
+function instantiate end
 
-"""
-    update(model, alg, iter, state, observation; kwargs...)
-
-Update beliefs on the propagated states.
-"""
-function update end
+# Default method
+function instantiate(model, alg, initial; kwargs...)
+    return Intermediate(initial, deepcopy(initial))
+end
 
 """
     initialise([rng,] model, alg; kwargs...)
@@ -35,18 +36,32 @@ Propose an initial state distribution.
 function initialise end
 
 """
-    step([rng,] model, alg, iter, state, observation; kwargs...)
+    step([rng,] model, alg, iter, intermediate, observation; kwargs...)
 
-Perform a combined predict and update call on a single iteration of the filter.
+Perform a combined predict and update call of the filtering on the intermediate storage.
 """
 function step end
+
+"""
+    predict([rng,] model, alg, iter, filtered; kwargs...)
+
+Propagate the filtered distribution forward in time.
+"""
+function predict end
+
+"""
+    update(model, alg, iter, proposed, observation; kwargs...)
+
+Update beliefs on the propagated distribution given an observation.
+"""
+function update end
 
 function initialise(model, alg; kwargs...)
     return initialise(default_rng(), model, alg; kwargs...)
 end
 
-function predict(model, alg, step, states; kwargs...)
-    return predict(default_rng(), model, alg, step, states; kwargs...)
+function predict(model, alg, step, filtered; kwargs...)
+    return predict(default_rng(), model, alg, step, filtered; kwargs...)
 end
 
 function filter(
@@ -57,18 +72,21 @@ function filter(
     callback=nothing,
     kwargs...,
 )
-    states = initialise(rng, model, alg; kwargs...)
+    initial = initialise(rng, model, alg; kwargs...)
+    intermediate = instantiate(model, alg, initial; kwargs...)
+    isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
     log_evidence = zero(eltype(model))
 
     for t in eachindex(observations)
-        states, log_marginal = step(
-            rng, model, alg, t, states, observations[t]; callback, kwargs...
+        intermediate, ll_increment = step(
+            rng, model, alg, t, intermediate, observations[t]; callback, kwargs...
         )
-        log_evidence += log_marginal
-        isnothing(callback) || callback(model, alg, t, states, observations; kwargs...)
+        log_evidence += ll_increment
+        isnothing(callback) ||
+            callback(model, alg, t, intermediate, observations; kwargs...)
     end
 
-    return states, log_evidence
+    return intermediate.filtered, log_evidence
 end
 
 function filter(
@@ -85,15 +103,24 @@ function step(
     model::AbstractStateSpaceModel,
     alg::AbstractFilter,
     iter::Integer,
-    state,
+    intermediate,
     observation;
     kwargs...,
 )
-    proposed_state = predict(rng, model, alg, iter, state; kwargs...)
-    filtered_state, ll = update(model, alg, iter, proposed_state, observation; kwargs...)
+    intermediate.proposed = predict(rng, model, alg, iter, intermediate.filtered; kwargs...)
+    intermediate.filtered, ll_increment = update(
+        model, alg, iter, intermediate.proposed, observation; kwargs...
+    )
 
-    return filtered_state, ll
+    return intermediate, ll_increment
 end
+
+## SMOOTHING BASE ##########################################################################
+
+abstract type AbstractSmoother <: AbstractSampler end
+
+# function smooth end
+# function backward end
 
 # Filtering utilities
 include("containers.jl")
