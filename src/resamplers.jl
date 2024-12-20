@@ -28,8 +28,10 @@ function resample(
     idxs = sample_ancestors(rng, resampler, weights)
 
     new_state = RaoBlackwellisedParticleState(
-        deepcopy(states.x_particles[:, idxs]),
-        deepcopy(states.z_particles[idxs]),
+        RaoBlackwellisedParticle(
+            deepcopy(states.particles.x_particles[:, idxs]),
+            deepcopy(states.particles.z_particles[idxs]),
+        ),
         CUDA.zeros(T, length(states)),
     )
 
@@ -80,7 +82,7 @@ function resample(
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
     else
-        return deepcopy(state), collect(1:n)
+        return deepcopy(state), CuArray(1:n)
     end
 end
 

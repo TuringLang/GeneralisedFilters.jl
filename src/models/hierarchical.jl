@@ -18,29 +18,25 @@ end
 Base.eltype(::Type{<:HierarchicalSSM{T,ODT,MT}}) where {T,ODT,MT} = T
 
 function AbstractMCMC.sample(
-    rng::AbstractRNG, model::HierarchicalSSM, extra0, extras::AbstractVector
+    rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
 )
-    T = length(extras)
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
+    zs = Vector{eltype(inner_model.dyn)}(undef, T)
     xs = Vector{eltype(outer_dyn)}(undef, T)
-    augmented_extras = Vector{NamedTuple}(undef, T)
+    ys = Vector{eltype(inner_model.obs)}(undef, T)
 
     # Simulate outer dynamics
-    x0 = simulate(rng, outer_dyn, extra0)
+    x0 = simulate(rng, outer_dyn; kwargs...)
+    z0 = simulate(rng, inner_model.dyn; new_outer=x0, kwargs...)
     for t in 1:T
         prev_x = t == 1 ? x0 : xs[t - 1]
-        xs[t] = simulate(rng, model.outer_dyn, t, prev_x, extras[t])
-        new_extras = (prev_outer=prev_x, new_outer=xs[t])
-        augmented_extras[t] =
-            isnothing(extras[t]) ? new_extras : (; extras[t]..., new_extras...)
+        xs[t] = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
+        zs[t] = simulate(
+            rng, inner_model.dyn, t, z0; prev_outer=prev_x, new_outer=xs[t], kwargs...
+        )
+        ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
-
-    new_extra0 = (; new_outer=x0)
-    augmented_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
-
-    # Simulate inner model
-    z0, zs, ys = sample(rng, inner_model, augmented_extra0, augmented_extras)
 
     return x0, z0, xs, zs, ys
 end
