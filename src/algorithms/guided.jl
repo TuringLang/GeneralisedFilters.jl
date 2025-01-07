@@ -7,7 +7,8 @@ export GuidedFilter, GPF, AbstractProposal
 """
 abstract type AbstractProposal end
 
-function SSMProblems.distribution(
+# TODO: improve this and ensure that there are no conflicts with SSMProblems
+function distribution(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
     step::Integer,
@@ -16,13 +17,11 @@ function SSMProblems.distribution(
     kwargs...,
 )
     return throw(
-        MethodError(
-            SSMProblems.distribution, (model, prop, step, state, observation, kwargs...)
-        ),
+        MethodError(distribution, (model, prop, step, state, observation, kwargs...))
     )
 end
 
-function SSMProblems.simulate(
+function simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
@@ -31,12 +30,10 @@ function SSMProblems.simulate(
     observation;
     kwargs...,
 )
-    return rand(
-        rng, SSMProblems.distribution(model, prop, step, state, observation; kwargs...)
-    )
+    return rand(rng, distribution(model, prop, step, state, observation; kwargs...))
 end
 
-function SSMProblems.logdensity(
+function logdensity(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
     step::Integer,
@@ -46,8 +43,7 @@ function SSMProblems.logdensity(
     kwargs...,
 )
     return logpdf(
-        SSMProblems.distribution(model, prop, step, prev_state, observation; kwargs...),
-        new_state,
+        distribution(model, prop, step, prev_state, observation; kwargs...), new_state
     )
 end
 
@@ -126,7 +122,7 @@ function update(
     log_increments = map(particle_collection) do (new_state, prev_state)
         log_f = SSMProblems.logdensity(model.dyn, step, prev_state, new_state; kwargs...)
         log_g = SSMProblems.logdensity(model.obs, step, new_state, observation; kwargs...)
-        log_q = SSMProblems.logdensity(
+        log_q = logdensity(
             model, filter.proposal, step, prev_state, new_state, observation; kwargs...
         )
 

@@ -144,7 +144,7 @@ end
     end
 
     # a lot of computations done at each step
-    function SSMProblems.distribution(
+    function GeneralisedFilters.distribution(
         model::AbstractStateSpaceModel,
         kernel::LinearGaussianProposal,
         step::Integer,
