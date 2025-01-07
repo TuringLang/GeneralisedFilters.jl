@@ -103,7 +103,7 @@ function predict(
         x -> SSMProblems.simulate(
             rng, model, filter.proposal, step, x, observation; kwargs...
         ),
-        collect(filtered)
+        collect(filtered),
     )
     proposed = ParticleDistribution(new_particles, deepcopy(filtered.log_weights))
 
@@ -137,7 +137,7 @@ function update(
         proposed, intermediate.proposed.log_weights + log_increments
     )
 
-    ll_increment  = logsumexp(intermediate.filtered.log_weights)
+    ll_increment = logsumexp(intermediate.filtered.log_weights)
     ll_increment -= logsumexp(intermediate.proposed.log_weights)
 
     return filtered, ll_increment
