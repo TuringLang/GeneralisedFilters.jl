@@ -128,6 +128,95 @@ end
     @test llkf ≈ llbf atol = 0.1
 end
 
+@testitem "Guided filter test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using Random: randexp
+    using Distributions
+
+    # this is a pseudo optimal proposal kernel for linear Gaussian models
+    struct LinearGaussianProposal{T<:Real} <: GeneralisedFilters.AbstractProposal
+        φ::Vector{T}
+    end
+
+    # a lot of computations done at each step
+    function SSMProblems.distribution(
+        model::AbstractStateSpaceModel,
+        kernel::LinearGaussianProposal,
+        step::Integer,
+        state,
+        observation;
+        kwargs...,
+    )
+        # get model dimensions
+        dx = length(state)
+        dy = length(observation)
+
+        # see (Corenflos et al, 2021) for details
+        A = GeneralisedFilters.calc_A(model.dyn, step; kwargs...)
+        Γ = diagm(dx, dy, kernel.φ[(dx + 1):end])
+        Σ = PDiagMat(φ[1:dx])
+
+        return MvNormal(inv(Σ) * A * state + inv(Σ) * Γ * observation, Σ)
+    end
+
+    T = Float32
+    rng = StableRNG(1234)
+    σx², σy² = randexp(rng, T, 2)
+
+    # initial state distribution
+    μ0 = zeros(T, 1)
+    Σ0 = PDiagMat(T[1;])
+
+    # state transition equation
+    A = T[0.9;;]
+    b = T[0;]
+    Q = PDiagMat([σx²;])
+
+    # observation equation
+    H = T[1;;]
+    c = T[0;]
+    R = PDiagMat([σy²;])
+
+    # proposal kernel (kind of optimal...)
+    φ = ones(T, 2)
+    proposal = LinearGaussianProposal(φ)
+
+    # when working with PDMats, the Kalman filter doesn't play nicely without this
+    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
+        return PDMat(Symmetric(mat))
+    end
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    _, _, data = sample(rng, model, 20)
+
+    # bootstrap filter
+    bf = BF(2^12; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    bf_xs = bf_state.particles
+    bf_ws = softmax(bf_state.log_weights)
+
+    # guided particle filter
+    pf = GPF(2^12, proposal; threshold=1.0)
+    pf_state, llpf = GeneralisedFilters.filter(rng, model, pf, data)
+    pf_xs = pf_state.particles
+    pf_ws = softmax(pf_state.log_weights)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+
+    # compare filtered states
+    @test first(kf_state.μ) ≈ sum(first.(bf_xs) .* bf_ws) rtol = 1e-2
+    @test first(kf_state.μ) ≈ sum(first.(pf_xs) .* pf_ws) rtol = 5e-1
+
+    # since this is log valued, we can up the tolerance
+    @test llkf ≈ llbf atol = 0.1
+    @test llkf ≈ llpf atol = 5
+end
+
 @testitem "Forward algorithm test" begin
     using GeneralisedFilters
     using Distributions

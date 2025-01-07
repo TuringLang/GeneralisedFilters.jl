@@ -118,9 +118,9 @@ function update(
     observation;
     kwargs...,
 ) where {T}
+    proposed = deepcopy(intermediate.proposed.particles)
     particle_collection = zip(
-        collect(intermediate.proposed),
-        deepcopy(intermediate.filtered.particles[intermediate.ancestors])
+        proposed, deepcopy(intermediate.filtered.particles[intermediate.ancestors])
     )
 
     log_increments = map(particle_collection) do (new_state, prev_state)
@@ -134,8 +134,7 @@ function update(
     end
 
     filtered = ParticleDistribution(
-        deepcopy(intermediate.proposed.particles),
-        intermediate.proposed.log_weights + log_increments
+        proposed, intermediate.proposed.log_weights + log_increments
     )
 
     ll_increment  = logsumexp(intermediate.filtered.log_weights)
@@ -144,7 +143,7 @@ function update(
     return filtered, ll_increment
 end
 
-# TODO: get rid of this eventually...
+# TODO: unify the particle interface between this and the bootstrap filter
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
