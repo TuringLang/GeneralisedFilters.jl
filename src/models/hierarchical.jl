@@ -1,4 +1,5 @@
-import SSMProblems: LatentDynamics, ObservationProcess, simulate
+import SSMProblems:
+    LatentDynamics, ObservationProcess, simulate, batch_simulate, batch_sample
 export HierarchicalSSM
 
 struct HierarchicalSSM{T<:Real,OD<:LatentDynamics{T},M<:StateSpaceModel{T}} <:
@@ -46,4 +47,36 @@ function AbstractMCMC.sample(
     end
 
     return x0, z0, xs, zs, ys
+end
+
+function SSMProblems.batch_sample(
+    rng::AbstractRNG, model::HierarchicalSSM, T::Integer, N::Integer; kwargs...
+)
+    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+    inner_dyn, obs = inner_model.dyn, inner_model.obs
+    # Batched types are not known at compile time
+    x0s = batch_simulate(rng, outer_dyn, N; kwargs...)
+    z0s = batch_simulate(rng, inner_dyn, N; new_outer=x0s, kwargs...)
+    xss = Vector{typeof(x0s)}(undef, T)
+    zss = Vector{typeof(z0s)}(undef, T)
+    xss[1] = batch_simulate(rng, outer_dyn, 1, x0s; kwargs...)
+    zss[1] = batch_simulate(rng, inner_dyn, 1, z0s; new_outer=xss[1], kwargs...)
+    y1s = batch_simulate(rng, obs, 1, zss[1]; new_outer=xss[1], kwargs...)
+    yss = Vector{typeof(y1s)}(undef, T)
+
+    for t in 2:T
+        xss[t] = batch_simulate(rng, outer_dyn, t, xss[t - 1]; kwargs...)
+        zss[t] = batch_simulate(
+            rng,
+            inner_dyn,
+            t,
+            zss[t - 1];
+            prev_outer=xss[t - 1],
+            new_outer=xss[t],
+            kwargs...,
+        )
+        yss[t] = batch_simulate(rng, obs, t, zss[t]; new_outer=xss[t], kwargs...)
+    end
+
+    return x0s, z0s, xss, zss, yss
 end

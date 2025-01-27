@@ -71,6 +71,72 @@ function SSMProblems.distribution(
     return MvNormal(H * state + c, R)
 end
 
+##########################
+#### BATCH SIMULATION ####
+##########################
+
+function cholesky_from_lu(Ls_lu::CuArray{T}, D, N) where {T}
+    # Compute Cholesky factor from L (scale L/U to have equal diagonals)
+    # This is not a particularly optimised approach since it will be replaced later
+    diags = CUDA.zeros(T, D, D, N)
+    for d in 1:D
+        diags[d, d, :] .= Ls_lu[d, d, :]
+    end
+    Ls = CUDA.zeros(T, D, D, N)
+    for d in 1:D
+        Ls[d, d, :] .= 1.0
+    end
+    for i in 1:D
+        for j in 1:(i - 1)
+            Ls[i, j, :] .= Ls_lu[i, j, :]
+        end
+    end
+    return NNlib.batched_mul(Ls, sqrt.(diags))
+end
+
+function SSMProblems.batch_simulate(
+    ::AbstractRNG, dyn::LinearGaussianLatentDynamics{T}, N::Integer; kwargs...
+) where {T}
+    μ0s, Σ0s = batch_calc_initial(dyn, N; kwargs...)
+    D = size(μ0s, 1)
+    # Compute Cholesky factor using LU decomposition (no pivoting needed for Cholesky)
+    # TODO: replace this with MAGMA's batched Choleksy
+    Ls_lu = CUDA.CUBLAS.getrf_batched(Σ0s, false)
+    Ls = cholesky_from_lu(Ls_lu, D, N)
+    return μ0s .+ NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
+end
+
+function SSMProblems.batch_simulate(
+    ::AbstractRNG,
+    dyn::LinearGaussianLatentDynamics{T},
+    step::Integer,
+    prev_state;
+    kwargs...,
+) where {T}
+    N = size(prev_state, 2)
+    As, bs, Qs = batch_calc_params(dyn, step, N; kwargs...)
+    D = size(prev_state, 1)
+    # Compute Cholesky factor using LU decomposition (no pivoting needed for Cholesky)
+    Ls_lu = CUDA.CUBLAS.getrf_batched(Qs, false)
+    Ls = cholesky_from_lu(Ls_lu, D, size(prev_state, 2))
+    return (
+        (NNlib.batched_vec(As, prev_state) .+ bs) +
+        NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
+    )
+end
+
+function SSMProblems.batch_simulate(
+    ::AbstractRNG, obs::LinearGaussianObservationProcess{T}, step::Integer, state; kwargs...
+) where {T}
+    N = size(state, 2)
+    Hs, cs, Rs = batch_calc_params(obs, step, N; kwargs...)
+    D = size(Hs, 1)
+    # Compute Cholesky factor using LU decomposition (no pivoting needed for Cholesky)
+    Ls_lu = CUDA.CUBLAS.getrf_batched(Rs, false)
+    Ls = cholesky_from_lu(Ls_lu, D, N)
+    return (NNlib.batched_vec(Hs, state) .+ cs) + NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
+end
+
 ###########################################
 #### HOMOGENEOUS LINEAR GAUSSIAN MODEL ####
 ###########################################
