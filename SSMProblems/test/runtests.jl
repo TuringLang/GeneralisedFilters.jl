@@ -2,6 +2,7 @@ using Distributions
 using Random
 using SSMProblems
 using Test
+using CUDA
 
 @testset "Forward Simulation" begin
     @testset "Forward simulation without control" begin
@@ -35,6 +36,11 @@ using Test
         # Sampling with/without rng
         @test sample(rng, model, T) isa Tuple
         @test sample(model, T) isa Tuple
+
+        # GPU tests
+        input_array = CUDA.fill(1.0f0, 10)
+        output_array = sample(model, T)
+        @test eltype(output_array) == eltype(input_array)
     end
 
     @testset "Forward simulation with control" begin
@@ -74,5 +80,10 @@ using Test
         # Sampling with/without rng
         @test sample(rng, model, T; σ_init=σ_init, dts=dts) isa Tuple
         @test sample(model, T; σ_init=σ_init, dts=dts) isa Tuple
+
+        # GPU tests
+        input_array = CUDA.fill(1.0f0, 10)
+        output_array = sample(model, T; σ_init=σ_init, dts=dts)
+        @test eltype(output_array) == eltype(input_array)
     end
 end
