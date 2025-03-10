@@ -1,6 +1,7 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 using CUDA: i32
+import LinearAlgebra: Symmetric
 
 export KalmanFilter, KF, KalmanSmoother, KS
 
@@ -12,7 +13,7 @@ function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
     μ0, Σ0 = calc_initial(model.dyn; kwargs...)
-    return Gaussian(μ0, Σ0)
+    return Gaussian(μ0, Matrix(Σ0))
 end
 
 function predict(
@@ -42,11 +43,8 @@ function update(
     # Update state
     m = H * μ + c
     y = obs - m
-    S = H * Σ * H' + R
+    S = Symmetric(H * Σ * H' + R)
     K = Σ * H' / S
-
-    # HACK: force the covariance to be positive definite
-    S = (S + S') / 2
 
     filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
 
